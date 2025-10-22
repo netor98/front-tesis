@@ -23,44 +23,44 @@ export const routes = [
         path: "/home",
         element: <Home />,
       },
-      {
-        icon: <UserCircleIcon {...icon} />,
-        name: "profile",
-        path: "/profile",
-        element: <Profile />,
-      },
+      // {
+      //   icon: <UserCircleIcon {...icon} />,
+      //   name: "profile",
+      //   path: "/profile",
+      //   element: <Profile />,
+      // },
       {
         icon: <TableCellsIcon {...icon} />,
-        name: "tables",
+        name: "Conductores",
         path: "/tables",
         element: <Tables />,
       },
-      {
-        icon: <InformationCircleIcon {...icon} />,
-        name: "notifications",
-        path: "/notifications",
-        element: <Notifications />,
-      },
+      // {
+      //   icon: <InformationCircleIcon {...icon} />,
+      //   name: "notifications",
+      //   path: "/notifications",
+      //   element: <Notifications />,
+      // },
     ],
   },
-  {
-    title: "auth pages",
-    layout: "auth",
-    pages: [
-      {
-        icon: <ServerStackIcon {...icon} />,
-        name: "sign in",
-        path: "/sign-in",
-        element: <SignIn />,
-      },
-      {
-        icon: <RectangleStackIcon {...icon} />,
-        name: "sign up",
-        path: "/sign-up",
-        element: <SignUp />,
-      },
-    ],
-  },
+  // {
+  //   title: "auth pages",
+  //   layout: "auth",
+  //   pages: [
+  //     {
+  //       icon: <ServerStackIcon {...icon} />,
+  //       name: "sign in",
+  //       path: "/sign-in",
+  //       element: <SignIn />,
+  //     },
+  //     {
+  //       icon: <RectangleStackIcon {...icon} />,
+  //       name: "sign up",
+  //       path: "/sign-up",
+  //       element: <SignUp />,
+  //     },
+  //   ],
+  // },
 ];
 
 export default routes;
