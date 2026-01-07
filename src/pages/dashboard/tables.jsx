@@ -1,5 +1,7 @@
 import {
+  createDriver,
   createVehicle,
+  deleteDriver,
   endTrip,
   fetchActiveTripByDriver,
   fetchDrivers,
@@ -7,48 +9,69 @@ import {
   fetchTripsByDriver,
   fetchVehicles,
   startTrip,
+  updateDriver,
 } from "@/api/client";
-import {
-  Alert,
-  Button,
-  Card,
-  CardBody,
-  Chip,
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  DialogHeader,
-  Input,
-  Option,
-  Select,
-  Typography,
-} from "@material-tailwind/react";
 import React from "react";
+import {
+  DriverDeleteDialog,
+  DriverFormDialog,
+  DriversTable,
+  ErrorAlert,
+  StatsDialog,
+  SuccessAlert,
+  VehicleFormDialog,
+  VehicleSelectDialog,
+  VehiclesTable,
+} from "./components";
 
 export function Tables() {
+  // Drivers state
   const [drivers, setDrivers] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
+  const [successMessage, setSuccessMessage] = React.useState("");
   const [activeTrips, setActiveTrips] = React.useState({});
   const [processingTrip, setProcessingTrip] = React.useState(null);
+
+  // Driver form dialog state (create/edit)
+  const [driverFormOpen, setDriverFormOpen] = React.useState(false);
+  const [editingDriver, setEditingDriver] = React.useState(null);
+  const [driverFormLoading, setDriverFormLoading] = React.useState(false);
+  const [driverFormError, setDriverFormError] = React.useState("");
+  const [driverFormSuccess, setDriverFormSuccess] = React.useState("");
+
+  // Driver delete dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
+  const [deletingDriver, setDeletingDriver] = React.useState(null);
+  const [deleteLoading, setDeleteLoading] = React.useState(false);
+  const [deleteError, setDeleteError] = React.useState("");
+
+  // Stats dialog state
   const [statsOpen, setStatsOpen] = React.useState(false);
   const [statsDriver, setStatsDriver] = React.useState(null);
   const [statsData, setStatsData] = React.useState([]);
   const [statsLoading, setStatsLoading] = React.useState(false);
   const [statsError, setStatsError] = React.useState("");
+
+  // Vehicles state
   const [vehicles, setVehicles] = React.useState([]);
   const [vehiclesLoading, setVehiclesLoading] = React.useState(true);
   const [vehicleError, setVehicleError] = React.useState("");
+
+  // Vehicle selection dialog state
   const [vehicleDialogOpen, setVehicleDialogOpen] = React.useState(false);
   const [selectedDriver, setSelectedDriver] = React.useState(null);
   const [selectedVehicle, setSelectedVehicle] = React.useState("");
   const [vehicleSelectionError, setVehicleSelectionError] = React.useState("");
+
+  // Vehicle form dialog state
   const [vehicleFormOpen, setVehicleFormOpen] = React.useState(false);
   const [newVehicleName, setNewVehicleName] = React.useState("");
   const [newVehiclePlate, setNewVehiclePlate] = React.useState("");
   const [creatingVehicle, setCreatingVehicle] = React.useState(false);
   const [vehicleSuccessMessage, setVehicleSuccessMessage] = React.useState("");
 
+  // Data loading functions
   const loadDriversAndTrips = React.useCallback(async () => {
     let isMounted = true;
     setLoading(true);
@@ -58,7 +81,6 @@ export function Tables() {
       if (!isMounted) return;
       setDrivers(Array.isArray(driversData) ? driversData : []);
 
-      // Load active trips for each driver
       const tripsMap = {};
       for (const driver of driversData) {
         try {
@@ -112,25 +134,29 @@ export function Tables() {
     loadVehicles();
   }, [loadVehicles]);
 
-  const handleStartTrip = async (conductorId) => {
-    setProcessingTrip(conductorId);
-    try {
-      const newTrip = await startTrip(conductorId);
-      await loadDriversAndTrips();
-      setError("");
-    } catch (e) {
-      setError(e.message || "Error al iniciar viaje");
-    } finally {
-      setProcessingTrip(null);
+  // Auto-dismiss error and success messages after 5 seconds
+  React.useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => setError(""), 5000);
+      return () => clearTimeout(timer);
     }
-  };
+  }, [error]);
 
+  React.useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(""), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
+
+  // Trip handlers
   const handleEndTrip = async (tripId, conductorId) => {
     setProcessingTrip(conductorId);
     try {
       await endTrip(tripId);
       await loadDriversAndTrips();
       setError("");
+      setSuccessMessage("Viaje finalizado correctamente");
     } catch (e) {
       setError(e.message || "Error al finalizar viaje");
     } finally {
@@ -138,6 +164,7 @@ export function Tables() {
     }
   };
 
+  // Vehicle selection dialog handlers
   const openVehicleDialog = (driver) => {
     setSelectedDriver(driver);
     setSelectedVehicle(vehicles[0]?.id_vehiculo?.toString() || "");
@@ -160,16 +187,101 @@ export function Tables() {
     }
     const vehicleId = Number(selectedVehicle);
     setProcessingTrip(selectedDriver.id_conductor);
+    setVehicleSelectionError("");
     try {
       await startTrip(selectedDriver.id_conductor, vehicleId);
       closeVehicleDialog();
       await loadDriversAndTrips();
       setError("");
+      setSuccessMessage("Viaje iniciado correctamente");
     } catch (e) {
-      setError(e.message || "Error al iniciar viaje");
+      // Show error in the dialog, not in the table
+      setVehicleSelectionError(e.message || "Error al iniciar viaje");
     } finally {
       setProcessingTrip(null);
     }
+  };
+
+  // Driver form dialog handlers (Create/Edit)
+  const handleOpenDriverForm = (driver = null) => {
+    setEditingDriver(driver);
+    setDriverFormError("");
+    setDriverFormSuccess("");
+    setDriverFormOpen(true);
+  };
+
+  const handleCloseDriverForm = () => {
+    setDriverFormOpen(false);
+    setEditingDriver(null);
+    setDriverFormError("");
+    setDriverFormSuccess("");
+  };
+
+  const handleSubmitDriver = async (driverData) => {
+    setDriverFormLoading(true);
+    setDriverFormError("");
+    try {
+      if (editingDriver) {
+        // Update existing driver
+        await updateDriver(editingDriver.id_conductor, driverData);
+        setDriverFormSuccess("Conductor actualizado correctamente");
+      } else {
+        // Create new driver
+        await createDriver(driverData);
+        setDriverFormSuccess("Conductor creado correctamente");
+      }
+      await loadDriversAndTrips();
+      setTimeout(() => {
+        handleCloseDriverForm();
+      }, 1000);
+    } catch (e) {
+      setDriverFormError(e.message || "Error al guardar conductor");
+    } finally {
+      setDriverFormLoading(false);
+    }
+  };
+
+  // Driver delete dialog handlers
+  const handleOpenDeleteDialog = (driver) => {
+    setDeletingDriver(driver);
+    setDeleteError("");
+    setDeleteDialogOpen(true);
+  };
+
+  const handleCloseDeleteDialog = () => {
+    setDeleteDialogOpen(false);
+    setDeletingDriver(null);
+    setDeleteError("");
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingDriver) return;
+    setDeleteLoading(true);
+    setDeleteError("");
+    try {
+      await deleteDriver(deletingDriver.id_conductor);
+      await loadDriversAndTrips();
+      handleCloseDeleteDialog();
+    } catch (e) {
+      setDeleteError(e.message || "Error al eliminar conductor");
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  // Vehicle form dialog handlers
+  const handleOpenVehicleForm = () => {
+    setVehicleFormOpen(true);
+    setVehicleError("");
+    setVehicleSuccessMessage("");
+  };
+
+  const handleCloseVehicleForm = () => {
+    setVehicleFormOpen(false);
+    setNewVehicleName("");
+    setNewVehiclePlate("");
+    setVehicleError("");
+    setVehicleSuccessMessage("");
   };
 
   const handleCreateVehicle = async () => {
@@ -195,20 +307,7 @@ export function Tables() {
     }
   };
 
-  const handleOpenVehicleForm = () => {
-    setVehicleFormOpen(true);
-    setVehicleError("");
-    setVehicleSuccessMessage("");
-  };
-
-  const handleCloseVehicleForm = () => {
-    setVehicleFormOpen(false);
-    setNewVehicleName("");
-    setNewVehiclePlate("");
-    setVehicleError("");
-    setVehicleSuccessMessage("");
-  };
-
+  // Stats dialog handlers
   const handleOpenStats = async (driver) => {
     setStatsDriver(driver);
     setStatsOpen(true);
@@ -257,471 +356,93 @@ export function Tables() {
     setStatsError("");
   };
 
-  const formatDate = (value) => {
-    if (!value) return "—";
-    try {
-      return new Date(value).toLocaleString("es-ES");
-    } catch (e) {
-      return value;
-    }
-  };
-
-  const formatNumber = (value, digits = 2) => {
-    if (value === null || value === undefined) return "—";
-    return Number(value).toFixed(digits);
-  };
-
   return (
     <div className="mt-12 mb-8 flex flex-col gap-12">
-      <Dialog open={vehicleDialogOpen} handler={closeVehicleDialog}>
-        <DialogHeader>Seleccionar vehículo</DialogHeader>
-        <DialogBody>
-          {vehiclesLoading ? (
-            <Typography className="text-sm text-blue-gray-600">
-              Cargando vehículos...
-            </Typography>
-          ) : vehicles.length === 0 ? (
-            <Typography className="text-sm text-blue-gray-600">
-              No hay vehículos registrados. Agrega uno para iniciar viajes.
-            </Typography>
-          ) : (
-            <div className="flex flex-col gap-4">
-              <Typography variant="small" color="blue-gray">
-                Conductor: {selectedDriver?.nombre}
-              </Typography>
-              <Select
-                label="Vehículo asignado"
-                value={selectedVehicle}
-                onChange={(value) => {
-                  setSelectedVehicle(value);
-                  setVehicleSelectionError("");
-                }}
-              >
-                {vehicles.map((vehicle) => (
-                  <Option key={vehicle.id_vehiculo} value={vehicle.id_vehiculo.toString()}>
-                    {vehicle.nombre} {vehicle.placa ? `(${vehicle.placa})` : ""}
-                  </Option>
-                ))}
-              </Select>
-              {vehicleSelectionError && (
-                <Alert color="red" className="text-xs">
-                  {vehicleSelectionError}
-                </Alert>
-              )}
-            </div>
-          )}
-        </DialogBody>
-        <DialogFooter className="space-x-2">
-          <Button variant="text" color="blue-gray" onClick={closeVehicleDialog}>
-            Cancelar
-          </Button>
-          <Button
-            variant="gradient"
-            color="green"
-            onClick={confirmStartTrip}
-            disabled={vehicles.length === 0 || vehiclesLoading || !selectedDriver}
-          >
-            Iniciar
-          </Button>
-        </DialogFooter>
-      </Dialog>
+      {/* Global Error/Success Notifications */}
+      <ErrorAlert message={error} onClose={() => setError("")} />
+      <SuccessAlert message={successMessage} onClose={() => setSuccessMessage("")} />
 
-      <Dialog open={vehicleFormOpen} handler={handleCloseVehicleForm}>
-        <DialogHeader>Agregar vehículo</DialogHeader>
-        <DialogBody>
-          <div className="flex flex-col gap-4">
-            <Input
-              label="Nombre del vehículo"
-              value={newVehicleName}
-              onChange={(e) => setNewVehicleName(e.target.value)}
-            />
-            <Input
-              label="Placa (opcional)"
-              value={newVehiclePlate}
-              onChange={(e) => setNewVehiclePlate(e.target.value)}
-            />
-            {vehicleSuccessMessage && (
-              <Alert color="green" className="text-xs">
-                {vehicleSuccessMessage}
-              </Alert>
-            )}
-            {vehicleError && (
-              <Alert color="red" className="text-xs">
-                {vehicleError}
-              </Alert>
-            )}
-          </div>
-        </DialogBody>
-        <DialogFooter className="space-x-2">
-          <Button variant="text" color="blue-gray" onClick={handleCloseVehicleForm}>
-            Cancelar
-          </Button>
-          <Button
-            variant="gradient"
-            color="green"
-            onClick={handleCreateVehicle}
-            disabled={creatingVehicle}
-          >
-            {creatingVehicle ? "Guardando..." : "Guardar"}
-          </Button>
-        </DialogFooter>
-      </Dialog>
+      {/* Driver Form Dialog (Create/Edit) */}
+      <DriverFormDialog
+        open={driverFormOpen}
+        onClose={handleCloseDriverForm}
+        onSubmit={handleSubmitDriver}
+        driver={editingDriver}
+        loading={driverFormLoading}
+        error={driverFormError}
+        successMessage={driverFormSuccess}
+      />
 
-      <Dialog open={statsOpen} handler={handleCloseStats} size="xl">
-        <DialogHeader>
-          Historial de viajes {statsDriver ? `- ${statsDriver.nombre}` : ""}
-        </DialogHeader>
-        <DialogBody className="max-h-[32rem] overflow-y-auto">
-          {statsLoading ? (
-            <Typography className="text-sm text-blue-gray-600">
-              Cargando historial de viajes...
-            </Typography>
-          ) : statsError ? (
-            <Typography className="text-sm text-red-600">{statsError}</Typography>
-          ) : statsData.length === 0 ? (
-            <Typography className="text-sm text-blue-gray-600">
-              No hay viajes finalizados para este conductor.
-            </Typography>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] table-auto">
-                <thead>
-                  <tr>
-                    {[
-                      "Viaje",
-                      "Vehículo",
-                      "Inicio",
-                      "Fin",
-                      "Duración (min)",
-                      "Lecturas",
-                      "Alertas",
-                      "Cabeceos",
-                      "Bostezos",
-                      "FC Promedio",
-                    ].map((header) => (
-                      <th
-                        key={header}
-                        className="border-b border-blue-gray-50 py-3 px-4 text-left"
-                      >
-                        <Typography
-                          variant="small"
-                          className="text-[11px] font-bold uppercase text-blue-gray-400"
-                        >
-                          {header}
-                        </Typography>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {statsData.map(({ trip, stats, error: tripError }) => (
-                    <tr key={trip.id_viaje} className="border-b border-blue-gray-50">
-                      <td className="py-3 px-4">
-                        <Typography className="text-xs font-semibold text-blue-gray-700">
-                          #{trip.id_viaje}
-                        </Typography>
-                      </td>
-                      <td className="py-3 px-4">
-                        <Typography className="text-xs text-blue-gray-600">
-                          {trip.vehiculo?.nombre || "—"}
-                        </Typography>
-                      </td>
-                      <td className="py-3 px-4">
-                        <Typography className="text-xs text-blue-gray-600">
-                          {formatDate(trip.fecha_inicio)}
-                        </Typography>
-                      </td>
-                      <td className="py-3 px-4">
-                        <Typography className="text-xs text-blue-gray-600">
-                          {formatDate(trip.fecha_fin)}
-                        </Typography>
-                      </td>
-                      <td className="py-3 px-4">
-                        <Typography className="text-xs text-blue-gray-600">
-                          {stats ? formatNumber(stats.duracion_minutos) : "—"}
-                        </Typography>
-                      </td>
-                      <td className="py-3 px-4">
-                        <Typography className="text-xs text-blue-gray-600">
-                          {stats ? stats.total_lecturas : "—"}
-                        </Typography>
-                      </td>
-                      <td className="py-3 px-4">
-                        <Typography className="text-xs text-blue-gray-600">
-                          {stats ? stats.total_alertas : "—"}
-                        </Typography>
-                      </td>
-                      <td className="py-3 px-4">
-                        <Typography className="text-xs text-blue-gray-600">
-                          {stats ? stats.total_cabeceos : "—"}
-                        </Typography>
-                      </td>
-                      <td className="py-3 px-4">
-                        <Typography className="text-xs text-blue-gray-600">
-                          {stats ? stats.total_bostezos : "—"}
-                        </Typography>
-                      </td>
-                      <td className="py-3 px-4">
-                        {tripError ? (
-                          <Typography className="text-[11px] text-red-500">
-                            {tripError}
-                          </Typography>
-                        ) : (
-                          <Typography className="text-xs text-blue-gray-600">
-                            {stats
-                              ? formatNumber(stats.frecuencia_cardiaca_promedio)
-                              : "—"}
-                          </Typography>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </DialogBody>
-        <DialogFooter>
-          <Button
-            variant="text"
-            color="red"
-            onClick={handleCloseStats}
-            className="mr-1"
-          >
-            <span>Cerrar</span>
-          </Button>
-        </DialogFooter>
-      </Dialog>
-      <h3 className="text-2xl font-bold ">Conductores registrados</h3>
-      <Card>
-        {/* <CardHeader variant="gradient" color="gray" className="mb-8 p-6"> */}
-        {/*   <Typography variant="h6" color="white"> */}
-        {/*     Authors Table */}
-        {/*   </Typography> */}
-        {/* </CardHeader> */}
-        <CardBody className="overflow-x-scroll px-0 pt-0 pb-2">
-          {loading && (
-            <div className="p-6">
-              <Typography className="text-sm text-blue-gray-600">
-                Cargando conductores...
-              </Typography>
-            </div>
-          )}
-          {error && !loading && (
-            <div className="p-6">
-              <Typography className="text-sm text-red-600">{error}</Typography>
-            </div>
-          )}
-          <table className="w-full min-w-[640px] table-auto">
-            <thead>
-              <tr>
-                {["Nombre", "Estado", "Vehículo", "Viaje Activo", "Acciones"].map(
-                  (el) => (
-                    <th
-                      key={el}
-                      className="border-b border-blue-gray-50 py-3 px-5 text-left"
-                    >
-                      <Typography
-                        variant="small"
-                        className="text-[11px] font-bold uppercase text-blue-gray-400"
-                      >
-                        {el}
-                      </Typography>
-                    </th>
-                  )
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {drivers.map(
-                ({ id_conductor, nombre, condicion_medica, activo }, key) => {
-                  const className = `py-3 px-5 ${key === drivers.length - 1 ? "" : "border-b border-blue-gray-50"}`;
-                  const activeTrip = activeTrips[id_conductor];
-                  const isProcessing = processingTrip === id_conductor;
+      {/* Driver Delete Confirmation Dialog */}
+      <DriverDeleteDialog
+        open={deleteDialogOpen}
+        onClose={handleCloseDeleteDialog}
+        onConfirm={handleConfirmDelete}
+        driver={deletingDriver}
+        loading={deleteLoading}
+        error={deleteError}
+      />
 
-                  return (
-                    <tr key={id_conductor}>
-                      <td className={className}>
-                        <div className="flex items-center gap-4">
-                          <div>
-                            <Typography
-                              variant="small"
-                              color="blue-gray"
-                              className="font-semibold"
-                            >
-                              {nombre}
-                            </Typography>
-                            <Typography className="text-xs font-normal text-blue-gray-500">
-                              {condicion_medica || "Sin condición registrada"}
-                            </Typography>
-                          </div>
-                        </div>
-                      </td>
-                      <td className={className}>
-                        <Chip
-                          variant="gradient"
-                          color={activo ? "green" : "blue-gray"}
-                          value={activo ? "activo" : "inactivo"}
-                          className="py-0.5 px-2 text-[11px] font-medium w-fit"
-                        />
-                      </td>
-                      <td className={className}>
-                        {activeTrip && activeTrip.vehiculo ? (
-                          <Typography className="text-xs font-semibold text-blue-gray-600">
-                            {activeTrip.vehiculo.nombre}
-                          </Typography>
-                        ) : (
-                          <Typography className="text-xs font-semibold text-blue-gray-400">
-                            —
-                          </Typography>
-                        )}
-                      </td>
-                      <td className={className}>
-                        {activeTrip ? (
-                          <Chip
-                            variant="gradient"
-                            color="green"
-                            value={`Viaje #${activeTrip.id_viaje} activo`}
-                            className="py-0.5 px-2 text-[11px] font-medium w-fit"
-                          />
-                        ) : (
-                          <Typography className="text-xs font-semibold text-blue-gray-400">
-                            Sin viaje activo
-                          </Typography>
-                        )}
-                      </td>
-                      <td className={className}>
-                        <div className="flex gap-2">
-                          {activeTrip ? (
-                            <Button
-                              size="sm"
-                              color="red"
-                              variant="outlined"
-                              onClick={() => handleEndTrip(activeTrip.id_viaje, id_conductor)}
-                              disabled={isProcessing}
-                              className="text-xs"
-                            >
-                              {isProcessing ? "Procesando..." : "Finalizar Viaje"}
-                            </Button>
-                          ) : (
-                            <Button
-                              size="sm"
-                              color="green"
-                              onClick={() => openVehicleDialog({ id_conductor, nombre })}
-                              disabled={isProcessing || !activo || vehicles.length === 0}
-                              className="text-xs"
-                            >
-                              {isProcessing ? "Procesando..." : "Iniciar Viaje"}
-                            </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="text"
-                            onClick={() =>
-                              handleOpenStats({
-                                id_conductor,
-                                nombre,
-                              })
-                            }
-                            className="text-xs"
-                          >
-                            Estadísticas
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                }
-              )}
-            </tbody>
-          </table>
-        </CardBody>
-      </Card>
+      {/* Vehicle Selection Dialog */}
+      <VehicleSelectDialog
+        open={vehicleDialogOpen}
+        onClose={closeVehicleDialog}
+        vehicles={vehicles}
+        vehiclesLoading={vehiclesLoading}
+        selectedDriver={selectedDriver}
+        selectedVehicle={selectedVehicle}
+        setSelectedVehicle={setSelectedVehicle}
+        vehicleSelectionError={vehicleSelectionError}
+        setVehicleSelectionError={setVehicleSelectionError}
+        onConfirm={confirmStartTrip}
+      />
 
-      <Card>
-        <CardBody className="px-0 pt-0 pb-2">
-          <div className="flex items-center justify-between px-6 py-4">
-            <div>
-              <Typography variant="h6" color="blue-gray">
-                Vehículos registrados
-              </Typography>
-              <Typography variant="small" color="blue-gray">
-                Usa el token para configurar la Raspberry asociada
-              </Typography>
-            </div>
-            <Button size="sm" color="blue" onClick={handleOpenVehicleForm}>
-              Agregar vehículo
-            </Button>
-          </div>
-          {vehiclesLoading ? (
-            <Typography className="px-6 pb-4 text-sm text-blue-gray-600">
-              Cargando vehículos...
-            </Typography>
-          ) : vehicles.length === 0 ? (
-            <Typography className="px-6 pb-4 text-sm text-blue-gray-600">
-              No hay vehículos registrados.
-            </Typography>
-          ) : (
-            <div className="overflow-x-auto px-6 pb-4">
-              <table className="w-full min-w-[640px] table-auto">
-                <thead>
-                  <tr>
-                    {["Nombre", "Placa", "Token dispositivo", "Estado"].map((header) => (
-                      <th
-                        key={header}
-                        className="border-b border-blue-gray-50 py-3 px-4 text-left"
-                      >
-                        <Typography
-                          variant="small"
-                          className="text-[11px] font-bold uppercase text-blue-gray-400"
-                        >
-                          {header}
-                        </Typography>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {vehicles.map(
-                    ({ id_vehiculo, nombre, placa, token_dispositivo, activo }, idx) => {
-                      const className = `py-3 px-4 ${
-                        idx === vehicles.length - 1 ? "" : "border-b border-blue-gray-50"
-                      }`;
-                      return (
-                        <tr key={id_vehiculo}>
-                          <td className={className}>
-                            <Typography className="text-xs font-semibold text-blue-gray-700">
-                              {nombre}
-                            </Typography>
-                          </td>
-                          <td className={className}>
-                            <Typography className="text-xs text-blue-gray-600">
-                              {placa || "—"}
-                            </Typography>
-                          </td>
-                          <td className={className}>
-                            <Typography className="text-xs font-mono text-blue-gray-600">
-                              {token_dispositivo}
-                            </Typography>
-                          </td>
-                          <td className={className}>
-                            <Chip
-                              variant="gradient"
-                              color={activo ? "green" : "blue-gray"}
-                              value={activo ? "activo" : "inactivo"}
-                              className="py-0.5 px-2 text-[11px] font-medium w-fit"
-                            />
-                          </td>
-                        </tr>
-                      );
-                    }
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardBody>
-      </Card>
+      {/* Vehicle Form Dialog */}
+      <VehicleFormDialog
+        open={vehicleFormOpen}
+        onClose={handleCloseVehicleForm}
+        vehicleName={newVehicleName}
+        setVehicleName={setNewVehicleName}
+        vehiclePlate={newVehiclePlate}
+        setVehiclePlate={setNewVehiclePlate}
+        successMessage={vehicleSuccessMessage}
+        error={vehicleError}
+        creating={creatingVehicle}
+        onCreate={handleCreateVehicle}
+      />
+
+      {/* Stats Dialog */}
+      <StatsDialog
+        open={statsOpen}
+        onClose={handleCloseStats}
+        driver={statsDriver}
+        statsData={statsData}
+        loading={statsLoading}
+        error={statsError}
+      />
+
+      {/* Drivers Table */}
+      <DriversTable
+        drivers={drivers}
+        loading={loading}
+        error={error}
+        activeTrips={activeTrips}
+        processingTrip={processingTrip}
+        vehicles={vehicles}
+        onStartTrip={openVehicleDialog}
+        onEndTrip={handleEndTrip}
+        onViewStats={handleOpenStats}
+        onEditDriver={handleOpenDriverForm}
+        onDeleteDriver={handleOpenDeleteDialog}
+        onAddDriver={() => handleOpenDriverForm(null)}
+      />
+
+      {/* Vehicles Table */}
+      <VehiclesTable
+        vehicles={vehicles}
+        loading={vehiclesLoading}
+        onAddVehicle={handleOpenVehicleForm}
+      />
     </div>
   );
 }
